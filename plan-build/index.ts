@@ -240,10 +240,6 @@ export default function planBuildExtension(pi: ExtensionAPI): void {
     pi.setActiveTools(PLAN_TOOLS);
     updateStatus(ctx);
     persistState();
-    ctx.ui.notify(
-      `PLAN mode -- read-only. Tools: ${PLAN_TOOLS.join(", ")}`,
-      "warning",
-    );
   }
 
   function switchToBuild(ctx: ExtensionContext): void {
@@ -252,10 +248,6 @@ export default function planBuildExtension(pi: ExtensionAPI): void {
     pi.setActiveTools(BUILD_TOOLS);
     updateStatus(ctx);
     persistState();
-    ctx.ui.notify(
-      `BUILD mode -- full access. Tools: ${BUILD_TOOLS.join(", ")}`,
-      "success",
-    );
 
     // Auto-detect pending plan and offer execution
     if (hasPendingPlan() && ctx.hasUI) {
@@ -285,35 +277,37 @@ export default function planBuildExtension(pi: ExtensionAPI): void {
   // ------------------------------------------------------------------
 
   function updateStatus(ctx: ExtensionContext): void {
-    if (planExecuting && planItems.length > 0) {
-      const completed = planItems.filter((t) => t.completed).length;
+    const completed = planItems.filter((t) => t.completed).length;
+    const modeLabel = currentMode === "plan" ? "📝PLAN" : "🔨BUILD";
+    // Both modes use the same color (BUILD color)
+    const modeColor = "success";
+
+    if (planItems.length > 0) {
+      // Always show mode + progress when there's a plan
+      const planIcon = planExecuting ? "📋" : "⏳";
       ctx.ui.setStatus(
         "plan-build",
-        ctx.ui.theme.fg("accent", `📋 ${completed}/${planItems.length}`),
-      );
-    } else if (currentMode === "plan") {
-      ctx.ui.setStatus(
-        "plan-build",
-        ctx.ui.theme.fg("warning", "PLAN"),
+        ctx.ui.theme.fg(modeColor, modeLabel) + " " +
+        ctx.ui.theme.fg("accent", `${planIcon} ${completed}/${planItems.length}`),
       );
     } else {
+      // No plan, just show mode
       ctx.ui.setStatus(
         "plan-build",
-        ctx.ui.theme.fg("success", "BUILD"),
+        ctx.ui.theme.fg(modeColor, modeLabel),
       );
     }
 
     // Widget showing plan progress
     if (planItems.length > 0) {
       const lines = planItems.map((item) => {
+        // Both completed and pending use same accent color
+        const checkMark = ctx.ui.theme.fg("accent", item.completed ? "☑ " : "☐ ");
         if (item.completed) {
-          return (
-            ctx.ui.theme.fg("success", "☑ ") +
-            ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text))
-          );
+          return checkMark + ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text));
         }
         const agentTag = item.agent ? ` [${item.agent}]` : "";
-        return `${ctx.ui.theme.fg("muted", "☐ ")}${item.text}${ctx.ui.theme.fg("dim", agentTag)}`;
+        return checkMark + item.text + ctx.ui.theme.fg("dim", agentTag);
       });
       ctx.ui.setWidget("plan-todos", lines);
     } else {
@@ -840,18 +834,18 @@ export default function planBuildExtension(pi: ExtensionAPI): void {
     const message = event.message as { role?: string; content?: unknown };
     if (message?.role !== "assistant") return;
 
+    // Improved: extract ALL text content, including from thinking blocks
     let text = "";
     if (typeof message.content === "string") {
       text = message.content;
     } else if (Array.isArray(message.content)) {
       text = message.content
-        .filter(
-          (block: { type?: string }) =>
-            typeof block === "object" && block.type === "text",
-        )
-        .map(
-          (block: { type?: string; text?: string }) => block.text ?? "",
-        )
+        .filter((block) => typeof block === "object" && block !== null)
+        .map((block) => {
+          const b = block as { type?: string; text?: string; thinking?: string };
+          // Include both text and thinking content
+          return (b.text ?? "") + (b.thinking ?? "");
+        })
         .join("\n");
     }
 
@@ -904,12 +898,12 @@ export default function planBuildExtension(pi: ExtensionAPI): void {
     } else if (Array.isArray(lastAssistant.content)) {
       text = lastAssistant.content
         .filter(
-          (block: { type?: string }) =>
-            typeof block === "object" && block.type === "text",
+          (block) => typeof block === "object" && block !== null,
         )
-        .map(
-          (block: { type?: string; text?: string }) => block.text ?? "",
-        )
+        .map((block) => {
+          const b = block as { type?: string; text?: string; thinking?: string };
+          return (b.text ?? "") + (b.thinking ?? "");
+        })
         .join("\n");
     }
 
